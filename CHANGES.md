@@ -9,9 +9,6 @@
   rough surface tiles and the world-floor quad are skipped (they cannot be seen from inside the ground; also saves GPU work).
 - Setting + en/ru strings added in the Detailed Terrain screen.
 
-## Not changed
-- Far clip plane / fog: see chat notes; not changed without being able to reproduce.
-
 # Changes (second round, untested - not compiled or run against Minecraft)
 
 ## Scan depth up to 1024
