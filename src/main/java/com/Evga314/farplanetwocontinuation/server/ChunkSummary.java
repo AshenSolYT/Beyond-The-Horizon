@@ -336,8 +336,9 @@ public final class ChunkSummary {
         int limit = Math.max(this.minY, start - this.scan.depth());
         int topY = Math.min(start, this.maxY + 1) - 1;
         boolean voidBelow = this.scan.voidBelow();
-        // Over the void one segment is kept free for the air under the scanned part.
-        int cap = voidBelow ? SEGMENT_CAP - 1 : SEGMENT_CAP;
+        // One segment is always kept free: over the void for the air under the scanned part, otherwise for the stone that closes a
+        // column cut off by the cap (see below), so a cut never turns a cave into a bottomless shaft or a stone pillar.
+        int cap = SEGMENT_CAP - 1;
         int y = topY;
 
         this.segOffsets[column] = (short) this.segTotal;
@@ -346,6 +347,7 @@ public final class ChunkSummary {
         int surfaceY = topY;
         int segments = 0;
         int openBlock = -1;   // block of the segment being grown; -1 = no segment open yet
+        boolean openOpaque = false;
         int openHeight = 0;
         int openLight = 0;
         boolean capped = false;
@@ -353,6 +355,13 @@ public final class ChunkSummary {
             BlockState state = source.state(x, y, z);
             Look look = BlockLook.look(state);
             int block = BlockLook.segment(look);
+            // Ores (and other solid blocks) inside solid rock deep under the ground would each cut a column into a new segment, and the
+            // cap would then be reached after a few dozen blocks, with everything under it stretched from one segment. Inside a run of
+            // rock they take its look; ores on the wall of a cave (next to air) stay.
+            if (topFound && openBlock > 0 && block != openBlock && openOpaque && look.opaque() && y < surfaceY - FOLD_DEPTH
+                && state.getLightEmission() == 0 && isFoldable(state)) {
+                block = openBlock;
+            }
             if (!topFound && look.block() != -1) {
                 this.topFraction[column] = (byte) look.height();
                 surfaceY = y;
@@ -371,6 +380,7 @@ public final class ChunkSummary {
                     }
                 }
                 openBlock = block;
+                openOpaque = look.opaque();
                 openHeight = 1;
                 openLight = source.lights() != null
                     ? Math.max(source.blockLight(x, y, z), source.blockLight(x, y + 1, z))
@@ -392,6 +402,11 @@ public final class ChunkSummary {
             if (voidBelow && this.segBlocks[this.segTotal - 1] != 0) {
                 this.addSegment(0, rest, 0);
                 segments++;
+            } else if (capped && !voidBelow && !lastSegmentOpaque()) {
+                // Cut off inside a cave (air, water, leaves): stretching that down would make it a shaft to the bottom of the world.
+                // Stone closes it instead, which the server then marks as a cave plug where it was cut off under open space.
+                this.addSegment(BlockLook.segment(BlockLook.look(Blocks.STONE.defaultBlockState())), rest, 0);
+                segments++;
             } else {
                 this.segHeights[this.segTotal - 1] += (short) rest;
             }
@@ -402,6 +417,27 @@ public final class ChunkSummary {
             ServerPerf.SCAN_NANOS.addAndGet(System.nanoTime() - started);
             ServerPerf.SCAN_COLUMNS.incrementAndGet();
         }
+    }
+
+    /** Deep ores, tuff and the like fold into the rock around them, see {@link #scan}. */
+    private static final int FOLD_DEPTH = 4;
+
+    private static boolean isFoldable(BlockState state) {
+        if (state.is(net.minecraft.tags.BlockTags.BASE_STONE_OVERWORLD) || state.is(net.minecraft.tags.BlockTags.BASE_STONE_NETHER)) {
+            return true;
+        }
+        String path = BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath();
+        return path.endsWith("_ore") || path.equals("tuff") || path.equals("deepslate") || path.equals("dirt") || path.equals("gravel")
+            || path.equals("raw_iron_block") || path.equals("raw_copper_block") || path.equals("raw_gold_block");
+    }
+
+    /** Whether the segment added last hides what is under it. */
+    private boolean lastSegmentOpaque() {
+        int id = Short.toUnsignedInt(this.segBlocks[this.segTotal - 1]);
+        if (id == 0) {
+            return false;
+        }
+        return BlockLook.look(BuiltInRegistries.BLOCK.byId(BlockLook.segmentBlock(id)).defaultBlockState()).opaque();
     }
 
     /** Appends one segment to the flat arrays, growing them by doubling when full. */

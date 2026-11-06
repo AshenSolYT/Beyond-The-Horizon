@@ -32,7 +32,7 @@ import org.slf4j.Logger;
 public final class TileDiskCache {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MAGIC = 0x46503243;
-    static final int FORMAT = 14;
+    static final int FORMAT = 15;
     private static final long MAX_FILE_SIZE = TileData.MAX_ENCODED_SIZE;
 
     private final Path root;

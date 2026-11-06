@@ -72,7 +72,7 @@ final class DetailGenerator {
 
     static DetailData generate(
         ServerLevel level, TilePos pos, Long2ObjectMap<LevelChunk> loaded, @Nullable ChunkSummaryCache saved, @Nullable VirtualChunkStore virtual,
-        ChunkSummary.Scan scan
+        ChunkSummary.Scan scan, int undergroundDepth
     ) {
         long phase = ServerPerf.ON ? System.nanoTime() : 0L;
         Context context = new Context(level, pos, loaded, saved, virtual, scan);
@@ -147,7 +147,7 @@ final class DetailGenerator {
             ServerPerf.DETAIL_COLLECT.add(trimStart - phase);
         }
         // Over the void nothing is left out: the last segment sent goes on to the bottom of the world, and there it must be air.
-        int[] kept = scan.voidBelow() ? counts : visibleSegments(counts, offsets, rawBlocks, rawHeights, stackTops, side, context.cell);
+        int[] kept = scan.voidBelow() ? counts : visibleSegments(counts, offsets, rawBlocks, rawHeights, stackTops, side, context.cell, undergroundDepth);
         if (ServerPerf.ON) {
             phase = System.nanoTime();
             ServerPerf.DETAIL_TRIM.add(phase - trimStart);
@@ -267,7 +267,9 @@ final class DetailGenerator {
      * Caves closed all around are left out. The last segment kept is always a block that hides what is under it, since it is drawn
      * down to the bottom of the world. Works on a square grid {@code side} cells wide; cells without a column do not count.
      */
-    private static int[] visibleSegments(int[] counts, int[] offsets, short[] blocks, short[] heights, short[] stackTops, int side, int cellSize) {
+    private static int[] visibleSegments(
+        int[] counts, int[] offsets, short[] blocks, short[] heights, short[] stackTops, int side, int cellSize, int undergroundDepth
+    ) {
         int cells = side * side;
         Int2BooleanOpenHashMap solidBlocks = new Int2BooleanOpenHashMap();
         // Top of the first block of each column that hides what is under it; Integer.MIN_VALUE for missing cells.
@@ -322,6 +324,10 @@ final class DetailGenerator {
                 if (neighbour >= 0 && ground[neighbour] != Integer.MIN_VALUE) {
                     keepTo[index] = Math.min(keepTo[index], ground[neighbour] - WALL_MARGIN);
                 }
+            }
+            if (undergroundDepth > 0) {
+                // Caves and buildings under the ground, closed ones too: everything down to this depth is kept.
+                keepTo[index] = Math.min(keepTo[index], ground[index] - undergroundDepth);
             }
         }
 

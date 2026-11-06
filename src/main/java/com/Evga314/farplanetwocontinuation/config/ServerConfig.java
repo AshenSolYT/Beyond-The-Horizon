@@ -44,6 +44,12 @@ public class ServerConfig {
      */
     public boolean detailOreVeins = false;
     public int detailScanDepthEnd = FarPlaneConstants.DEFAULT_END_SCAN_DEPTH;
+    /**
+     * Keep caves and underground buildings in detailed tiles, also those closed all around, down to {@link #detailUndergroundDepth}
+     * blocks under the ground. Off: only caves near their mouths, as before.
+     */
+    public boolean detailUnderground = true;
+    public int detailUndergroundDepth = FarPlaneConstants.DEFAULT_UNDERGROUND_DEPTH;
 
     public void sanitize() {
         this.maxDistance = Mth.clamp(this.maxDistance, FarPlaneConstants.MIN_LOD_DISTANCE, FarPlaneConstants.MAX_LOD_DISTANCE);
@@ -56,6 +62,7 @@ public class ServerConfig {
         this.detailMaxRadiusChunks = Mth.clamp(this.detailMaxRadiusChunks, 0, FarPlaneConstants.MAX_DETAIL_RADIUS_CHUNKS);
         this.detailScanDepth = scanDepth(this.detailScanDepth);
         this.detailScanDepthEnd = scanDepth(this.detailScanDepthEnd);
+        this.detailUndergroundDepth = scanDepth(this.detailUndergroundDepth);
     }
 
     /** A scan depth within the limits, rounded to a whole step. */

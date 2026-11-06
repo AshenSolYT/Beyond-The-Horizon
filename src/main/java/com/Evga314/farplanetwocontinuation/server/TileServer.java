@@ -898,7 +898,8 @@ public final class TileServer {
                 return cached.data();
             }
         }
-        DetailData data = DetailGenerator.generate(level, pos, loaded, this.config.detailReadSavedChunks ? this.chunkSummaries : null, virtual, scan);
+        DetailData data = DetailGenerator.generate(level, pos, loaded, this.config.detailReadSavedChunks ? this.chunkSummaries : null, virtual, scan,
+            this.config.detailUnderground && scan.depth() > 0 ? Math.min(this.config.detailUndergroundDepth, scan.depth()) : 0);
         long encodeStart = ServerPerf.ON ? System.nanoTime() : 0L;
         byte[] encoded = data.encode();
         if (ServerPerf.ON) {
