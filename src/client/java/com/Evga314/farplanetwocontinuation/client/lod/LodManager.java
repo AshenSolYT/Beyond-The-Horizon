@@ -324,6 +324,11 @@ public final class LodManager {
         return this.enclosedUnderground;
     }
 
+    /** Whether the detailed terrain is drawn while the camera is underground (caves and buildings under the ground). */
+    public boolean undergroundLod() {
+        return this.config.detail().underground && this.config.detail().enabled;
+    }
+
     private void checkUnderground(ClientLevel level) {
         BlockPos camera = BlockPos.containing(this.view.camX, this.view.camY, this.view.camZ);
         // Deep in the sea there is no sky light either, and the heightmap stops at the surface of the water: in water the camera is
@@ -766,7 +771,8 @@ public final class LodManager {
         this.cullCamY = this.view.camY;
         this.cullCamZ = this.view.camZ;
         List<TileMesh> detailTiles = ringRadius > 0.0 ? this.detail.drawList() : List.of();
-        boolean off = this.config.dimension == DimensionKind.END || PerfLog.occlusionOff();
+        // Underground the terrain over the camera would hide everything below it: no culling there.
+        boolean off = this.config.dimension == DimensionKind.END || PerfLog.occlusionOff() || this.enclosedUnderground && this.undergroundLod();
         if (this.cullJob != null && this.cullJob.isDone()) {
             this.cullResult = this.cullJob.getNow(null);
             this.cullJob = null;

@@ -317,7 +317,8 @@ public final class TileMeshBuilder {
         BlockPos.MutableBlockPos scratch = new BlockPos.MutableBlockPos();
 
         // The heights evened out over the samples around each one, for the shade of hollows and ridges; null keeps the old shade.
-        float[] blurred = smoothing.shading() > 0 ? blurredHeights(data) : null;
+        float[] blurred = smoothing.shading() == 1 ? blurredHeights(data) : null;
+        boolean flatShade = smoothing.shading() == 2;
         float minY = Float.MAX_VALUE;
         float maxY = -Float.MAX_VALUE;
         for (int z = 0; z < S; z++) {
@@ -348,6 +349,9 @@ public final class TileMeshBuilder {
                     float sun = (dx * SUN_X + dz * SUN_Z) / area;
                     float hollow = Mth.clamp(1.0F + HOLLOW_STRENGTH * (height - blurred[index]) / spacing, 0.82F, 1.05F);
                     landShade *= Mth.clamp((1.0F + SUN_STRENGTH * sun) * hollow, 0.8F, 1.1F);
+                }
+                if (flatShade) {
+                    landShade = 1.0F;
                 }
                 grounds[index] = (int) height;
                 slopes[index] = slope;

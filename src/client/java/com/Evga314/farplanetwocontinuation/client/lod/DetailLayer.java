@@ -137,6 +137,6 @@ final class DetailLayer extends LodLayer {
     @Override
     GeneralMeshFactory.Built build(byte[] bytes, long key, int epoch, Registry<Biome> biomes, int seaLevel) throws Exception {
         DetailData data = DetailData.decode(bytes);
-        return DetailMeshBuilder.build(key, epoch, data, Arrays.asList(GeneralMeshFactory.resolveBiomes(biomes, data.palette)), this.config.detail().blocks());
+        return DetailMeshBuilder.build(key, epoch, data, Arrays.asList(GeneralMeshFactory.resolveBiomes(biomes, data.palette)), this.config.detail().blocks(), this.config.detail().shading, this.config.detail().greedy);
     }
 }

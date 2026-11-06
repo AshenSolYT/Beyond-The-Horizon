@@ -471,7 +471,7 @@ public final class LodRenderer {
         return !this.pipelineFailed
             && this.manager.isActive()
             && !this.manager.drawList().isEmpty()
-            && !this.manager.enclosedUnderground()
+            && (!this.manager.enclosedUnderground() || this.manager.undergroundLod())
             && (camera.fogType == FogType.NONE || camera.fogType == FogType.WATER)
             && !camera.isPanoramicMode
             && camera.projectionMatrix.m23() != 0.0F;
@@ -660,8 +660,13 @@ public final class LodRenderer {
                 waterTop = this.waterSurface(minecraft.level, camX, camY, camZ);
             }
         }
+        boolean underground = this.manager.enclosedUnderground();
         for (TileMesh mesh : this.manager.drawList()) {
             if (mesh.vertices.isClosed() || mesh.occluded) {
+                continue;
+            }
+            if (underground && !mesh.detail) {
+                // The rough terrain is only a surface seen from above: from inside the ground nothing of it shows.
                 continue;
             }
             double minX = mesh.pos.minX() - camX;
@@ -758,7 +763,7 @@ public final class LodRenderer {
         // The bottom of the world under the sea, see floorVertices. Its transform comes after those of the tiles.
         // The new renderer's tiles need none of these, see OwnPassOutput.
         boolean floor = minecraft.level != null && DimensionKind.of(minecraft.level) == DimensionKind.OVERWORLD && !DebugToggles.noPatch
-            && !DebugToggles.surface;
+            && !DebugToggles.surface && !underground;
         int floorIndex = this.visible.size();
         boolean wall = wallRadius > 0.0F && hasSky;
         int wallIndex = floorIndex + (floor ? 1 : 0);

@@ -36,7 +36,11 @@ public class SmoothingConfigScreen extends OptionsSubScreen {
         } else {
             this.list.addSmall(this.smoothingOption("coasts", s.coasts, value -> s.coasts = value), this.smoothingOption("snow", s.snow, value -> s.snow = value));
             this.list.addSmall(this.smoothingOption("forests", s.forests, value -> s.forests = value), this.smoothingOption("biomes", s.biomes, value -> s.biomes = value));
-            this.list.addSmall(this.smoothingOption("water", s.water, value -> s.water = value), null);
+            this.list.addSmall(this.smoothingOption("water", s.water, value -> s.water = value), new OptionInstance<>(
+                PREFIX + "shading", OptionInstance.cachedConstantTooltip(Component.translatable(PREFIX + "shading.tooltip")),
+                (caption, current) -> Options.genericValueLabel(caption, Component.translatable(PREFIX + "shading." + current)),
+                new OptionInstance.IntRange(0, 2), s.shading, value -> s.shading = value
+            ));
         }
     }
 

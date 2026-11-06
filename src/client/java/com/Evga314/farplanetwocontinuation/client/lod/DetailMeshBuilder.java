@@ -117,8 +117,10 @@ final class DetailMeshBuilder {
         }
     }
 
-    static GeneralMeshFactory.Built build(long key, int epoch, DetailData data, List<@Nullable Holder<Biome>> biomes, BlockDetail detail) {
-        return new Tile(data, biomes, detail, TilePos.unpack(key)).build(key, epoch);
+    static GeneralMeshFactory.Built build(
+        long key, int epoch, DetailData data, List<@Nullable Holder<Biome>> biomes, BlockDetail detail, boolean shading, boolean greedy
+    ) {
+        return new Tile(data, biomes, detail, TilePos.unpack(key), shading, greedy).build(key, epoch);
     }
 
     /**
@@ -251,6 +253,8 @@ final class DetailMeshBuilder {
         private final BlockLooks.Look waterLook = BlockLooks.get(WATER);
         /** The cave plug (see DetailData#CAVE_PLUG), drawn as stone in a dim light, see PLUG_LIGHT. */
         private final boolean[] plugs;
+        /** Off: faces keep one brightness whatever way they face, and caves and plugs are lit like the open (see ClientConfig.DetailSettings#shading). */
+        private final boolean shading;
         /** Per segment of the tile's cells: the paints of a plant under water and of its upper half, -1 for none. */
         private final int[] plantPaints;
         private final int[] plantUpperPaints;
@@ -278,14 +282,15 @@ final class DetailMeshBuilder {
         private int low;
         private int high;
 
-        Tile(DetailData data, List<@Nullable Holder<Biome>> biomes, BlockDetail detail, TilePos pos) {
+        Tile(DetailData data, List<@Nullable Holder<Biome>> biomes, BlockDetail detail, TilePos pos, boolean shading, boolean greedy) {
+            this.shading = shading;
             this.data = data;
             this.biomes = biomes;
             this.detail = detail;
             this.cell = 1 << (pos.level() - 1);
             this.baseX = pos.minX();
             this.baseZ = pos.minZ();
-            this.out = new QuadWriter(detail.textured());
+            this.out = new QuadWriter(detail.textured(), shading, greedy);
             this.ids = data.blockIds();
             int size = this.ids.length;
             this.looks = new BlockLooks.Look[size];
@@ -608,7 +613,7 @@ final class DetailMeshBuilder {
                                 // Under snow, grass has the snowy side, as vanilla's snowy grass block.
                                 BlockLooks.Face side = look.snowySide() != null && s > offset && this.snow[this.block(s - 1)] ? look.snowySide() : look.side();
                                 this.sidePaints[s] = this.paints.index(paint(side, look.state(), water, this.detail, biome, worldX, y, worldZ, around, look.groundCover()));
-                                if (this.plugs[block] && !this.detail.textured()) {
+                                if (this.shading && this.plugs[block] && !this.detail.textured()) {
                                     // Textured, it gets a dim sky light instead (see cell).
                                     this.topPaints[s] = this.dark(this.topPaints[s]);
                                     this.sidePaints[s] = this.dark(this.sidePaints[s]);
@@ -801,14 +806,19 @@ final class DetailMeshBuilder {
             while (firstDry < end && (this.water[this.block(firstDry)] || this.wets[this.block(firstDry)])) {
                 firstDry++;
             }
+            boolean covered = false;
             for (int s = first; s < end; s++) {
+                // Something that stops light lies over this segment: a cave or a room under the ground gets no light of the sky.
+                if (s > first && this.opaque[this.block(s - 1)]) {
+                    covered = true;
+                }
                 int block = this.block(s);
                 byte kind = this.kinds[block];
                 if (kind == AIR || kind == PLANT) {
                     continue;
                 }
                 out.pocket = s > firstDry;
-                int skyLight = this.plugs[block] ? PLUG_LIGHT : 15;
+                int skyLight = !this.shading ? 15 : this.plugs[block] ? PLUG_LIGHT : covered ? CAVE_LIGHT : 15;
                 if (skyLight != out.sky) {
                     // Walls waiting to be joined with the ones under them are written with the light they were made under.
                     this.flushWalls();
@@ -1253,6 +1263,8 @@ final class DetailMeshBuilder {
     private static final float DARKEST_LIGHT = 0.05F;
     /** The sky's light in the cave plug (see DetailData#CAVE_PLUG): dim, but not black, so caves keep their shape. */
     private static final int PLUG_LIGHT = 4;
+    /** The sky's light in caves and rooms under the ground that are kept (see ServerConfig#detailUnderground). */
+    private static final int CAVE_LIGHT = 3;
     /** How far under the top of its block vanilla draws the surface of water with nothing over it. */
     private static final float WATER_DIP = 1.0F / 9.0F;
     /** {@link #underwaterLight} for every depth until it stops changing. */
@@ -1269,6 +1281,9 @@ final class DetailMeshBuilder {
     }
 
     private static final class QuadWriter {
+        private final boolean greedy;
+        private final java.util.ArrayList<Pending> pending = new java.util.ArrayList<>();
+        private final boolean shading;
         private final boolean textured;
         private final int vertexSize;
         /** One growing buffer per way faces can face, see {@link TileMesh#GROUPS}. */
@@ -1315,7 +1330,9 @@ final class DetailMeshBuilder {
             return buffers;
         });
 
-        QuadWriter(boolean textured) {
+        QuadWriter(boolean textured, boolean shading, boolean greedy) {
+            this.greedy = greedy;
+            this.shading = shading;
             this.textured = textured;
             this.vertexSize = textured ? TEXTURED_VERTEX_SIZE : GeneralMeshFactory.VERTEX_SIZE;
             this.buffers = SCRATCH.get();
@@ -1338,16 +1355,19 @@ final class DetailMeshBuilder {
         }
 
         void startChunk(int chunk) {
+            this.flushPending();
             for (int g = 0; g < TileMesh.GROUPS; g++) {
                 this.chunkStarts[g * this.chunks + chunk] = this.counts[g];
             }
         }
 
         void startGlows(int chunk) {
+            this.flushPending();
             this.plantStarts[chunk * 2] = this.counts[TileMesh.GROUP_OTHER];
         }
 
         void startPlants(int chunk) {
+            this.flushPending();
             this.plantStarts[chunk * 2 + 1] = this.counts[TileMesh.GROUP_OTHER];
         }
 
@@ -1377,6 +1397,222 @@ final class DetailMeshBuilder {
         }
 
         void quad(
+            float ax, float ay, float az, float bx, float by, float bz, float cx, float cy, float cz, float dx, float dy, float dz, Paint paint, float shade,
+            int kind
+        ) {
+            if (!this.shading) {
+                shade = 1.0F;
+            }
+            if (!this.greedy) {
+                this.quadNow(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, paint, shade, kind);
+                return;
+            }
+            // Greedy meshing: quads wait until the chunk is done, then neighbouring ones of the same look are joined, see flushPending.
+            Pending p = new Pending();
+            p.paint = paint;
+            p.shade = shade;
+            p.kind = kind;
+            p.sky = this.sky;
+            p.lightWaterTop = this.lightWaterTop;
+            p.pocket = this.pocket;
+            p.blockLight = this.blockLight;
+            p.light = this.light;
+            p.corners = new float[] {ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz};
+            int group = paint.water() ? TileMesh.GROUP_WATER : group(ax, ay, az, bx, by, bz, cx, cy, cz);
+            p.group = group;
+            boolean flat = group != TileMesh.GROUP_WATER && group != TileMesh.GROUP_OTHER && paint.overlay() == null;
+            // Under water the colors darken with height along a wall; only faces of one height can be joined.
+            if (flat && this.lightWaterTop != NO_WATER && group != TileMesh.GROUP_UP && group != TileMesh.GROUP_DOWN) {
+                flat = false;
+            }
+            int light = this.blockLight;
+            if (flat && this.light != null) {
+                // Each corner has the light of blocks at its place; joined quads only have their outer corners, so only a quad with one
+                // light all over can be joined.
+                int l0 = Math.max(this.blockLight, this.light.at(ax, ay, az));
+                int l1 = Math.max(this.blockLight, this.light.at(bx, by, bz));
+                int l2 = Math.max(this.blockLight, this.light.at(cx, cy, cz));
+                int l3 = Math.max(this.blockLight, this.light.at(dx, dy, dz));
+                if (l0 == l1 && l1 == l2 && l2 == l3) {
+                    light = l0;
+                } else {
+                    flat = false;
+                }
+            }
+            p.mergeable = flat;
+            p.lightFlat = light;
+            if (flat) {
+                float[] c = p.corners;
+                switch (group) {
+                    case TileMesh.GROUP_UP, TileMesh.GROUP_DOWN -> {
+                        p.plane = ay;
+                        p.u0 = Math.min(Math.min(ax, bx), Math.min(cx, dx));
+                        p.u1 = Math.max(Math.max(ax, bx), Math.max(cx, dx));
+                        p.v0 = Math.min(Math.min(az, bz), Math.min(cz, dz));
+                        p.v1 = Math.max(Math.max(az, bz), Math.max(cz, dz));
+                    }
+                    case TileMesh.GROUP_NORTH, TileMesh.GROUP_SOUTH -> {
+                        p.plane = az;
+                        p.u0 = Math.min(Math.min(ax, bx), Math.min(cx, dx));
+                        p.u1 = Math.max(Math.max(ax, bx), Math.max(cx, dx));
+                        p.v0 = Math.min(Math.min(ay, by), Math.min(cy, dy));
+                        p.v1 = Math.max(Math.max(ay, by), Math.max(cy, dy));
+                    }
+                    default -> {
+                        p.plane = ax;
+                        p.u0 = Math.min(Math.min(az, bz), Math.min(cz, dz));
+                        p.u1 = Math.max(Math.max(az, bz), Math.max(cz, dz));
+                        p.v0 = Math.min(Math.min(ay, by), Math.min(cy, dy));
+                        p.v1 = Math.max(Math.max(ay, by), Math.max(cy, dy));
+                    }
+                }
+                // Anything not a flat rectangle in its plane (a slanted or degenerate quad) is written as it is.
+                if (!(p.u1 > p.u0 && p.v1 > p.v0) || !flatInPlane(group, c, p.plane)) {
+                    p.mergeable = false;
+                }
+            }
+            this.pending.add(p);
+        }
+
+        /** Whether all four corners lie in the plane the quad was sorted into. */
+        private static boolean flatInPlane(int group, float[] c, float plane) {
+            int axis = group == TileMesh.GROUP_UP || group == TileMesh.GROUP_DOWN ? 1 : group == TileMesh.GROUP_NORTH || group == TileMesh.GROUP_SOUTH ? 2 : 0;
+            return c[axis] == plane && c[3 + axis] == plane && c[6 + axis] == plane && c[9 + axis] == plane;
+        }
+
+        /** One quad waiting to be written, with everything the writer held when it was made. */
+        private static final class Pending {
+            float[] corners;
+            Paint paint;
+            float shade;
+            int kind;
+            int group;
+            int sky;
+            int lightWaterTop;
+            int blockLight;
+            @Nullable TileLight light;
+            boolean pocket;
+            boolean mergeable;
+            int lightFlat;
+            float plane;
+            float u0;
+            float u1;
+            float v0;
+            float v1;
+        }
+
+        private record MergeKey(int group, float plane, Paint paint, float shade, int kind, int sky, int lightWaterTop, boolean pocket, int light) {
+        }
+
+        /**
+         * Writes the waiting quads. Quads in one plane with the same look, light and neighbouring edges are joined into bigger ones,
+         * first along one direction of the plane, then along the other, until nothing joins any more. Joined quads are written first and
+         * the rest after them in their old order, so what lies over a face in its plane (the grass edge of a block's side) still comes
+         * after it.
+         */
+        private void flushPending() {
+            if (this.pending.isEmpty()) {
+                return;
+            }
+            int savedSky = this.sky;
+            int savedWater = this.lightWaterTop;
+            int savedBlock = this.blockLight;
+            boolean savedPocket = this.pocket;
+            TileLight savedLight = this.light;
+            java.util.LinkedHashMap<MergeKey, java.util.ArrayList<float[]>> merged = new java.util.LinkedHashMap<>();
+            for (Pending p : this.pending) {
+                if (p.mergeable) {
+                    MergeKey key = new MergeKey(p.group, p.plane, p.paint, p.shade, p.kind, p.sky, p.lightWaterTop, p.pocket, p.lightFlat);
+                    merged.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(new float[] {p.u0, p.u1, p.v0, p.v1});
+                }
+            }
+            for (java.util.Map.Entry<MergeKey, java.util.ArrayList<float[]>> entry : merged.entrySet()) {
+                MergeKey k = entry.getKey();
+                this.sky = k.sky();
+                this.lightWaterTop = k.lightWaterTop();
+                this.pocket = k.pocket();
+                this.blockLight = k.light();
+                this.light = null;
+                for (float[] r : joinRects(entry.getValue())) {
+                    this.writeRect(k, r[0], r[1], r[2], r[3]);
+                }
+            }
+            for (Pending p : this.pending) {
+                if (p.mergeable) {
+                    continue;
+                }
+                this.sky = p.sky;
+                this.lightWaterTop = p.lightWaterTop;
+                this.pocket = p.pocket;
+                this.blockLight = p.blockLight;
+                this.light = p.light;
+                float[] c = p.corners;
+                this.quadNow(c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11], p.paint, p.shade, p.kind);
+            }
+            this.pending.clear();
+            this.sky = savedSky;
+            this.lightWaterTop = savedWater;
+            this.blockLight = savedBlock;
+            this.pocket = savedPocket;
+            this.light = savedLight;
+        }
+
+        /** Rectangles {u0, u1, v0, v1} of one plane, with the ones that touch along a whole edge joined. */
+        private static java.util.List<float[]> joinRects(java.util.List<float[]> rects) {
+            java.util.List<float[]> current = rects;
+            boolean changed = true;
+            while (changed && current.size() > 1) {
+                changed = false;
+                for (int pass = 0; pass < 2; pass++) {
+                    // Pass 0 joins along u between rectangles with the same v range; pass 1 the other way round.
+                    final int a0 = pass == 0 ? 0 : 2;
+                    final int a1 = pass == 0 ? 1 : 3;
+                    final int b0 = pass == 0 ? 2 : 0;
+                    final int b1 = pass == 0 ? 3 : 1;
+                    java.util.ArrayList<float[]> sorted = new java.util.ArrayList<>(current);
+                    sorted.sort((x, y) -> {
+                        int c = Float.compare(x[b0], y[b0]);
+                        if (c == 0) {
+                            c = Float.compare(x[b1], y[b1]);
+                        }
+                        return c == 0 ? Float.compare(x[a0], y[a0]) : c;
+                    });
+                    java.util.ArrayList<float[]> out = new java.util.ArrayList<>(sorted.size());
+                    float[] last = null;
+                    for (float[] r : sorted) {
+                        if (last != null && last[b0] == r[b0] && last[b1] == r[b1] && r[a0] <= last[a1]) {
+                            if (r[a1] > last[a1]) {
+                                last[a1] = r[a1];
+                            }
+                            changed = true;
+                        } else {
+                            last = r.clone();
+                            out.add(last);
+                        }
+                    }
+                    current = out;
+                }
+            }
+            return current;
+        }
+
+        /** Writes one joined rectangle of a plane, the corners in the order the faces of this builder have them. */
+        private void writeRect(MergeKey k, float u0, float u1, float v0, float v1) {
+            float p = k.plane();
+            Paint paint = k.paint();
+            float shade = k.shade();
+            int kind = k.kind();
+            switch (k.group()) {
+                case TileMesh.GROUP_UP -> this.quadNow(u0, p, v0, u0, p, v1, u1, p, v1, u1, p, v0, paint, shade, kind);
+                case TileMesh.GROUP_DOWN -> this.quadNow(u0, p, v0, u1, p, v0, u1, p, v1, u0, p, v1, paint, shade, kind);
+                case TileMesh.GROUP_NORTH -> this.quadNow(u0, v0, p, u0, v1, p, u1, v1, p, u1, v0, p, paint, shade, kind);
+                case TileMesh.GROUP_SOUTH -> this.quadNow(u0, v0, p, u1, v0, p, u1, v1, p, u0, v1, p, paint, shade, kind);
+                case TileMesh.GROUP_WEST -> this.quadNow(p, v0, u0, p, v0, u1, p, v1, u1, p, v1, u0, paint, shade, kind);
+                default -> this.quadNow(p, v0, u0, p, v1, u0, p, v1, u1, p, v0, u1, paint, shade, kind);
+            }
+        }
+
+        private void quadNow(
             float ax, float ay, float az, float bx, float by, float bz, float cx, float cy, float cz, float dx, float dy, float dz, Paint paint, float shade,
             int kind
         ) {
@@ -1455,6 +1691,7 @@ final class DetailMeshBuilder {
 
         /** The quads written, group after group, in a buffer of their own: the scratch buffers are used again by the next tile. */
         ByteBuffer finish() {
+            this.flushPending();
             int bytes = 0;
             for (ByteBuffer group : this.buffers) {
                 bytes += group.position();

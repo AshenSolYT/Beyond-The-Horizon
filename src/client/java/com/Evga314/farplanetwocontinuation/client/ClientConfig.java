@@ -149,7 +149,7 @@ public class ClientConfig {
         public int forestsBlur = DEFAULT.forestsBlur();
         public int biomesBlur = DEFAULT.biomesBlur();
         public int waterBlur = DEFAULT.waterBlur();
-        /** Baked sun and hollow shade over the distant terrain: 0 off, 1 on. */
+        /** Shade of the distant terrain: 0 vanilla's slope shade only, 1 plus a baked sun and hollow shade, 2 none (flat colors). */
         public int shading = DEFAULT.shading();
         public static final int MAX_BLUR = GeneralMeshFactory.MAX_SOFTNESS;
         /** Version of these settings: 1.2.42 set the blur of water borders higher on its own, which is taken back. */
@@ -171,7 +171,7 @@ public class ClientConfig {
             this.forestsBlur = Mth.clamp(this.forestsBlur, 0, MAX_BLUR);
             this.biomesBlur = Mth.clamp(this.biomesBlur, 0, MAX_BLUR);
             this.waterBlur = Mth.clamp(this.waterBlur, 0, MAX_BLUR);
-            this.shading = Mth.clamp(this.shading, 0, 1);
+            this.shading = Mth.clamp(this.shading, 0, 2);
         }
 
         String signature() {
@@ -226,6 +226,12 @@ public class ClientConfig {
          * much less garbage. Decided like {@link #scanDepth}.
          */
         public boolean oreVeins = false;
+        /** Keep drawing detailed terrain (caves, underground buildings) while the camera is underground. */
+        public boolean underground = true;
+        /** Faces shaded by the way they face and caves darkened, as vanilla does; off draws every face in its plain color. */
+        public boolean shading = true;
+        /** Greedy meshing of the detailed tiles: neighbouring faces of the same look share quads, so far fewer vertices are drawn. */
+        public boolean greedy = true;
 
         public BlockDetail blocks() {
             return BlockDetail.of(this.blockDetail);
@@ -239,7 +245,7 @@ public class ClientConfig {
 
         String signature() {
             return this.enabled + "|" + this.radiusChunks + "|" + this.gpuMegabytes + "|" + this.generate
-                + "|" + this.blockDetail + "|" + this.scanDepth + "|" + this.oreVeins;
+                + "|" + this.blockDetail + "|" + this.scanDepth + "|" + this.oreVeins + "|" + this.shading + "|" + this.greedy;
         }
     }
 
