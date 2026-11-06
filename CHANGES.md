@@ -15,7 +15,7 @@
 - `FarPlaneConstants.MAX_SCAN_DEPTH` 256 -> 1024, `DEFAULT_UNDERGROUND_DEPTH` 64 -> 1024 (still limited by the scan depth).
 - Cache formats (`TileDiskCache.FORMAT`, `VirtualChunkStore.FORMAT`) and `PROTOCOL_VERSION` bumped: old caches are rebuilt.
 
-## Caves / giant pillars
+## Caves / giant pillars bug fix
 - `ChunkSummary.scan`: a column holds at most 64 segments; ores etc. each made a new one, so the cap was hit a few dozen blocks down
   and the last segment was stretched to the bottom of the world (stone pillar or bottomless shaft). Now:
   - ores, tuff, deepslate, dirt, gravel deeper than 4 blocks inside a run of rock fold into that run (ores next to air stay);
